@@ -1,12 +1,24 @@
 import 'package:flutter/material.dart';
+import 'package:movie_explorer/reusable/reusable.dart';
 
-class LoginScreen extends StatelessWidget {
+import '../appUI/home/home.dart';
+
+
+class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});
 
   static String id = 'login_screen';
 
   @override
+  State<LoginScreen> createState() => _LoginScreenState();
+}
+
+class _LoginScreenState extends State<LoginScreen> {
+  bool obscureText = true;
+  @override
   Widget build(BuildContext context) {
+
+
     return Scaffold(
       body:Container(
 
@@ -50,50 +62,28 @@ class LoginScreen extends StatelessWidget {
               // Username / Email Field
               Container(
                 margin: const EdgeInsets.only(bottom: 20), // Spacing between fields
-                child: TextField(
-                  style: const TextStyle(color: Colors.white), // Text the user types
-                  decoration: InputDecoration(
-                    filled: true,
-                    fillColor: const Color(0xFF2B2B2B), // Dark input background
-                    hintText: 'User name',
-                    hintStyle: const TextStyle(color: Colors.white70),
-                    prefixIcon: const Icon(Icons.person, color: Color(0xFFFF7A19)),
-                    contentPadding: const EdgeInsets.symmetric(vertical: 18, horizontal: 20),
-                    enabledBorder: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(15),
-                      borderSide: const BorderSide(color: Colors.transparent), // Clean look
-                    ),
-                    focusedBorder: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(15),
-                      borderSide: const BorderSide(color: Color(0xFFFF7A19)), // Orange glow when clicking
-                    ),
-                  ),
+                child: CustomTextField(
+                  hintText: "User Name",
+                  icon:  Icons.person,
+
                 ),
               ),
 
 // Password Field
               Container(
-                child: TextField(
-                  obscureText: true, // Hides the password dots!
-                  style: const TextStyle(color: Colors.white),
-                  decoration: InputDecoration(
-                    filled: true,
-                    fillColor: const Color(0xFF2B2B2B),
-                    hintText: 'Password',
-                    hintStyle: const TextStyle(color: Colors.white70),
-                    prefixIcon: const Icon(Icons.lock, color: Color(0xFFFF7A19)),
-                    suffixIcon: const Icon(Icons.visibility_off, color: Colors.white54), // Eye icon
-                    contentPadding: const EdgeInsets.symmetric(vertical: 18, horizontal: 20),
-                    enabledBorder: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(15),
-                      borderSide: const BorderSide(color: Colors.transparent),
-                    ),
-                    focusedBorder: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(15),
-                      borderSide: const BorderSide(color: Color(0xFFFF7A19)),
-                    ),
-                  ),
-                ),
+                child: CustomTextField(
+                  hintText: "Password",
+                  icon: Icons.lock,
+
+                  suffixIcon:
+                  obscureText ? Icons.visibility_off : Icons.visibility,
+                  obscureText: obscureText,
+                  onSuffixTap: () {
+                    setState(() {
+                      obscureText = !obscureText;
+                    });
+                  },
+                )
               ),
                   // button
               // 1. The Gradient Login Button
@@ -109,7 +99,10 @@ class LoginScreen extends StatelessWidget {
                 ),
                 child: ElevatedButton(
                   onPressed: () {
-                    // Define your login logic here
+                    Navigator.push(
+                        context, MaterialPageRoute(builder: (context) => const HomeScreen()
+                    )
+                    );
                   },
                   style: ElevatedButton.styleFrom(
                     backgroundColor: Colors.transparent,
@@ -156,3 +149,4 @@ class LoginScreen extends StatelessWidget {
     );
   }
 }
+
