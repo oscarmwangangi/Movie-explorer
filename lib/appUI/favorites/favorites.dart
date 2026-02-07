@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 class FavoritesScreen extends StatefulWidget {
   const FavoritesScreen({super.key});
+
   static String id = "favorites.dart";
 
   @override

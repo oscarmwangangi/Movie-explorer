@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:movie_explorer/appUI/footer/buildFooter.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -13,25 +14,32 @@ class _HomeScreenState extends State<HomeScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      body: Container(
+      backgroundColor: Colors.white,
+      body: Stack(
+        children: [
+          Padding(
+
+            padding: EdgeInsets.only(bottom: 90),
 
 
-      ),
-      bottomNavigationBar: Container(
-        color: Colors.black,
-        child: const Text(
-          "© 2026 Movie Explorer",
-          textAlign: TextAlign.center,
-          style: TextStyle(color: Colors.white),
-        ),
+            child: Container(
 
-        
-        
-    ),
+              child: Text("movie content goes here",
+              style: TextStyle(color: Colors.cyan),
+              )
+            )
+          ),
 
+          Align(
+            alignment: Alignment.bottomCenter,
+            child: buildFooter(context),
+
+          )
+        ],
+      )
     );
-
+  }
 
   }
-}
+
 
