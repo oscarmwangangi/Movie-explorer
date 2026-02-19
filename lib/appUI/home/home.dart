@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:movie_explorer/appUI/footer/buildFooter.dart';
+import 'package:movie_explorer/appUI/widget/movieSection.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -14,28 +15,36 @@ class _HomeScreenState extends State<HomeScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: Colors.white,
-      body: Stack(
-        children: [
-          Padding(
+      // backgroundColor: Colors.white,
+      body: SafeArea(
+        child: Stack(
+          children: [
 
-            padding: EdgeInsets.only(bottom: 90),
+            SingleChildScrollView(
+              child: Padding(
+                padding: EdgeInsets.only(bottom: 90, left: 16),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text("Home",
+                        style: TextStyle(color: Colors.white, fontSize: 28,fontWeight: FontWeight.bold)
+                    ),
+                    SizedBox(height: 20),
+                    Moviesection(title: 'Popular',),
+                    Moviesection(title: 'Top Rated'),
+                    Moviesection(title: 'Up comming'),
+                  ],
 
+                  ),
+                )
+              ),
 
-            child: Container(
-
-              child: Text("movie content goes here",
-              style: TextStyle(color: Colors.cyan),
-              )
+            Align(
+              alignment: Alignment.bottomCenter,
+              child: buildFooter(context),
             )
-          ),
-
-          Align(
-            alignment: Alignment.bottomCenter,
-            child: buildFooter(context),
-
-          )
-        ],
+          ],
+        ),
       )
     );
   }

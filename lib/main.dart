@@ -15,6 +15,7 @@ class myApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
+      theme: ThemeData.dark(),
       initialRoute: LoginScreen.id,
       routes:{
         LoginScreen.id: (context) => LoginScreen(),
