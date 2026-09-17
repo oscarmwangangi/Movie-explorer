@@ -97,6 +97,20 @@ class _SubscriptionScreenState extends State<SubscriptionScreen> with WidgetsBin
     return Scaffold(
       appBar: AppBar(
         title: const Text('Subscription'),
+        leading: IconButton(
+          icon: const Icon(Icons.arrow_back),
+          onPressed: () async {
+            // Log out and clear the stack to return to login cleanly
+            await ApiService.logout();
+            if (mounted) {
+              Navigator.pushNamedAndRemoveUntil(
+                context,
+                LoginScreen.id,
+                (route) => false,
+              );
+            }
+          },
+        ),
         actions: [
           IconButton(
             icon: const Icon(Icons.refresh),

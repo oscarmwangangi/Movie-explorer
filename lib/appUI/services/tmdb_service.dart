@@ -7,6 +7,10 @@ class TMDBService {
   /// The API key required for authenticating with TMDB, now loaded from .env.
   static String get apiKey => dotenv.env['TMDB_API_KEY'] ?? "";
 
+  static Future<http.Response> _get(Uri url) {
+    return http.get(url).timeout(const Duration(seconds: 10));
+  }
+
   /// Searches for movies on TMDB based on the provided [query].
   /// Returns a list of movie objects as [List<dynamic>].
   /// Throws an [Exception] if the API call fails.
@@ -16,7 +20,7 @@ class TMDBService {
         "https://api.themoviedb.org/3/search/movie?api_key=$apiKey&query=$query");
 
     // Perform an asynchronous HTTP GET request.
-    final response = await http.get(url);
+    final response = await _get(url);
 
     if (response.statusCode == 200) {
       // Decode the JSON response body.
@@ -35,7 +39,7 @@ class TMDBService {
     final url = Uri.parse(
         "https://api.themoviedb.org/3/discover/movie?api_key=$apiKey&include_adult=false&include_video=false&language=en-US&page=1&sort_by=popularity.desc");
 
-    final response = await http.get(url);
+    final response = await _get(url);
 
     if (response.statusCode == 200) {
       final data = json.decode(response.body);
@@ -50,7 +54,7 @@ class TMDBService {
     final url = Uri.parse(
         "https://api.themoviedb.org/3/discover/movie?api_key=$apiKey&include_adult=false&include_video=false&language=en-US&page=1&sort_by=vote_average.desc&without_genres=99,10755&vote_count.gte=200");
 
-    final response = await http.get(url);
+    final response = await _get(url);
 
     if (response.statusCode == 200) {
       final data = json.decode(response.body);
@@ -65,7 +69,7 @@ class TMDBService {
     final url = Uri.parse(
         "https://api.themoviedb.org/3/movie/upcoming?api_key=$apiKey&language=en-US&page=1");
 
-    final response = await http.get(url);
+    final response = await _get(url);
 
     if (response.statusCode == 200) {
       final data = json.decode(response.body);
@@ -81,7 +85,7 @@ class TMDBService {
     final url = Uri.parse(
         "https://api.themoviedb.org/3/movie/now_playing?api_key=$apiKey&language=en-US&page=1");
 
-    final response = await http.get(url);
+    final response = await _get(url);
 
     if (response.statusCode == 200) {
       final data = json.decode(response.body);
@@ -97,7 +101,7 @@ class TMDBService {
     final url = Uri.parse(
         "https://api.themoviedb.org/3/$type/$movieId/videos?api_key=$apiKey&language=en-US");
 
-    final response = await http.get(url);
+    final response = await _get(url);
 
     if (response.statusCode == 200) {
       final data = json.decode(response.body);
@@ -112,7 +116,7 @@ class TMDBService {
     final type = isTv ? 'tv' : 'movie';
     final url = Uri.parse(
         "https://api.themoviedb.org/3/$type/$id/similar?api_key=$apiKey&language=en-US&page=1");
-    final response = await http.get(url);
+    final response = await _get(url);
     if (response.statusCode == 200) {
       final data = json.decode(response.body);
       return data["results"];
@@ -126,7 +130,7 @@ class TMDBService {
     final type = isTv ? 'tv' : 'movie';
     final url = Uri.parse(
         "https://api.themoviedb.org/3/$type/$movieId?api_key=$apiKey&language=en-US");
-    final response = await http.get(url);
+    final response = await _get(url);
     if (response.statusCode == 200) {
       return json.decode(response.body);
     } else {
@@ -138,7 +142,7 @@ class TMDBService {
   static Future<List> getTVSeries() async {
     final url = Uri.parse(
         "https://api.themoviedb.org/3/tv/popular?api_key=$apiKey&language=en-US&page=1");
-    final response = await http.get(url);
+    final response = await _get(url);
     if (response.statusCode == 200) {
       final data = json.decode(response.body);
       return data["results"];
@@ -151,7 +155,7 @@ class TMDBService {
   static Future<List> getHorrorMovies() async {
     final url = Uri.parse(
         "https://api.themoviedb.org/3/discover/movie?api_key=$apiKey&with_genres=27");
-    final response = await http.get(url);
+    final response = await _get(url);
     if (response.statusCode == 200) {
       final data = json.decode(response.body);
       return data["results"];
@@ -164,7 +168,7 @@ class TMDBService {
   static Future<List> getKidsMovies() async {
     final url = Uri.parse(
         "https://api.themoviedb.org/3/discover/movie?api_key=$apiKey&with_genres=16,10751");
-    final response = await http.get(url);
+    final response = await _get(url);
     if (response.statusCode == 200) {
       final data = json.decode(response.body);
       return data["results"];
@@ -177,7 +181,7 @@ class TMDBService {
   static Future<List> getTrending() async {
     final url = Uri.parse(
         "https://api.themoviedb.org/3/trending/all/day?api_key=$apiKey");
-    final response = await http.get(url);
+    final response = await _get(url);
     if (response.statusCode == 200) {
       final data = json.decode(response.body);
       return data["results"];
@@ -190,7 +194,7 @@ class TMDBService {
   static Future<List> getActionMovies() async {
     final url = Uri.parse(
         "https://api.themoviedb.org/3/discover/movie?api_key=$apiKey&with_genres=28");
-    final response = await http.get(url);
+    final response = await _get(url);
     if (response.statusCode == 200) {
       final data = json.decode(response.body);
       return data["results"];
@@ -203,7 +207,7 @@ class TMDBService {
   static Future<List> getSciFiFantasyMovies() async {
     final url = Uri.parse(
         "https://api.themoviedb.org/3/discover/movie?api_key=$apiKey&with_genres=878,14");
-    final response = await http.get(url);
+    final response = await _get(url);
     if (response.statusCode == 200) {
       final data = json.decode(response.body);
       return data["results"];
@@ -216,7 +220,7 @@ class TMDBService {
   static Future<List> getDocumentaries() async {
     final url = Uri.parse(
         "https://api.themoviedb.org/3/discover/movie?api_key=$apiKey&with_genres=99");
-    final response = await http.get(url);
+    final response = await _get(url);
     if (response.statusCode == 200) {
       final data = json.decode(response.body);
       return data["results"];
@@ -229,7 +233,7 @@ class TMDBService {
   static Future<List> getRomanceMovies() async {
     final url = Uri.parse(
         "https://api.themoviedb.org/3/discover/movie?api_key=$apiKey&with_genres=10749");
-    final response = await http.get(url);
+    final response = await _get(url);
     if (response.statusCode == 200) {
       final data = json.decode(response.body);
       return data["results"];
@@ -242,7 +246,7 @@ class TMDBService {
   static Future<List> getTopRatedTVSeries() async {
     final url = Uri.parse(
         "https://api.themoviedb.org/3/tv/top_rated?api_key=$apiKey&language=en-US&page=1");
-    final response = await http.get(url);
+    final response = await _get(url);
     if (response.statusCode == 200) {
       final data = json.decode(response.body);
       return data["results"];
@@ -256,7 +260,7 @@ class TMDBService {
     final type = isTv ? 'tv' : 'movie';
     final url = Uri.parse(
         "https://api.themoviedb.org/3/$type/$id/watch/providers?api_key=$apiKey");
-    final response = await http.get(url);
+    final response = await _get(url);
     if (response.statusCode == 200) {
       final data = json.decode(response.body);
       return data["results"] ?? {};
@@ -268,7 +272,7 @@ class TMDBService {
   static Future<Map<String, dynamic>> getTVDetails(int tvId) async {
     final url = Uri.parse(
         "https://api.themoviedb.org/3/tv/$tvId?api_key=$apiKey&language=en-US");
-    final response = await http.get(url);
+    final response = await _get(url);
     if (response.statusCode == 200) {
       return json.decode(response.body);
     } else {
@@ -280,7 +284,7 @@ class TMDBService {
   static Future<List> getTVSeasonEpisodes(int tvId, int seasonNumber) async {
     final url = Uri.parse(
         "https://api.themoviedb.org/3/tv/$tvId/season/$seasonNumber?api_key=$apiKey&language=en-US");
-    final response = await http.get(url);
+    final response = await _get(url);
     if (response.statusCode == 200) {
       final data = json.decode(response.body);
       return data["episodes"];
@@ -294,7 +298,7 @@ class TMDBService {
     final url = Uri.parse(
         "https://api.themoviedb.org/3/search/multi?api_key=$apiKey&query=$query&include_adult=false&language=en-US&page=1");
 
-    final response = await http.get(url);
+    final response = await _get(url);
 
     if (response.statusCode == 200) {
       final data = json.decode(response.body);
@@ -358,7 +362,7 @@ class TMDBService {
     final url = Uri.parse(
         "https://api.themoviedb.org/3/$endpoint${separator}api_key=$apiKey&page=$page");
 
-    final response = await http.get(url);
+    final response = await _get(url);
     if (response.statusCode == 200) {
       return json.decode(response.body)["results"];
     }

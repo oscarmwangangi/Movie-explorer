@@ -12,10 +12,13 @@ import 'package:flutter_inappwebview/flutter_inappwebview.dart';
 import 'package:window_manager/window_manager.dart';
 import 'package:movie_explorer/main.dart';
 import 'package:movie_explorer/appUI/services/watch_history_service.dart';
+import 'package:movie_explorer/appUI/services/tmdb_service.dart';
+import 'package:movie_explorer/appUI/home/movie_details.dart';
 
 class MoviePlayerScreen extends StatefulWidget {
   final int tmdbId;
   final String title;
+  final String? seriesName; // Added for TV show context
   final bool isTv;
   final int season;
   final int episode;
@@ -26,6 +29,7 @@ class MoviePlayerScreen extends StatefulWidget {
   const MoviePlayerScreen({
     required this.tmdbId,
     required this.title,
+    this.seriesName,
     this.isTv = false,
     this.season = 1,
     this.episode = 1,
@@ -52,11 +56,20 @@ class _MoviePlayerScreenState extends State<MoviePlayerScreen> with WindowListen
   bool _isFullScreen = false;
   bool _showControls = true;
   Timer? _hideTimer;
+  Timer? _mobileSafetyTimer;
   bool _isMinimized = false;
 
   bool isLoading = true;
   double loadingProgress = 0;
-  late final String _playerUrl;
+  late String _playerUrl;
+
+  // TV Navigation State
+  List _seasons = [];
+  List _episodes = [];
+  late int _currentSeason;
+  late int _currentEpisode;
+  bool _isLoadingTVData = false;
+  String? _tvName;
 
   bool get _isWindows => !kIsWeb && Platform.isWindows;
   bool get _isLinux => !kIsWeb && Platform.isLinux;
@@ -64,35 +77,21 @@ class _MoviePlayerScreenState extends State<MoviePlayerScreen> with WindowListen
   @override
   void initState() {
     super.initState();
+    _currentSeason = widget.season;
+    _currentEpisode = widget.episode;
+    _tvName = widget.seriesName;
+
     if (_isWindows) {
       windowManager.addListener(this);
     }
 
-    // Record this open for the Home screen's Continue Watching rail.
-    // See WatchHistoryService for why this tracks "recently opened"
-    // rather than a verified playback percentage.
-    WatchHistoryService.recordWatch(
-      {
-        'id': widget.tmdbId,
-        'title': widget.title,
-        'name': widget.title,
-        'poster_path': widget.posterPath,
-        'backdrop_path': widget.backdropPath,
-        'vote_average': widget.voteAverage,
-      },
-      isTv: widget.isTv,
-      season: widget.isTv ? widget.season : null,
-      episode: widget.isTv ? widget.episode : null,
-    );
+    _updatePlayerUrl();
+    _recordWatch();
 
-    // Construct the player URL using environment variables
-    final tvBase = dotenv.env['PLAYER_TV_URL'] ?? "https://vidsrc.to/embed/tv";
-    final movieBase = dotenv.env['PLAYER_MOVIE_URL'] ?? "https://vidsrc.to/embed/movie";
-
-    _playerUrl = widget.isTv
-        ? "$tvBase/${widget.tmdbId}/${widget.season}/${widget.episode}"
-        : "$movieBase/${widget.tmdbId}";
-
+    if (widget.isTv) {
+      _fetchTVData();
+    }
+    
     if (_isWindows) {
       _initWindowsWebview();
       return;
@@ -109,14 +108,45 @@ class _MoviePlayerScreenState extends State<MoviePlayerScreen> with WindowListen
     _controller = WebViewController()
       ..setJavaScriptMode(JavaScriptMode.unrestricted)
       ..setBackgroundColor(Colors.black)
-      ..setUserAgent("Mozilla/5.0 (iPhone; CPU iPhone OS 16_6 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.6 Mobile/15E148 Safari/604.1",)
+      ..setUserAgent("Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1")
       ..setNavigationDelegate(
         NavigationDelegate(
+          onProgress: (int progress) {
+            if (mounted) {
+              setState(() {
+                loadingProgress = progress / 100;
+                // If progress is high enough, hide the loader even if "finished" hasn't fired
+                if (progress > 80) {
+                  isLoading = false;
+                  _mobileSafetyTimer?.cancel();
+                }
+              });
+            }
+          },
           onPageStarted: (String url) {
-            setState(() => isLoading = true);
+            if (mounted) {
+              setState(() => isLoading = true);
+              // Start a safety timer for mobile: force-hide loader after 15s if it gets stuck
+              _mobileSafetyTimer?.cancel();
+              _mobileSafetyTimer = Timer(const Duration(seconds: 15), () {
+                if (mounted && isLoading) {
+                  setState(() => isLoading = false);
+                }
+              });
+            }
           },
           onPageFinished: (String url) {
-            setState(() => isLoading = false);
+            if (mounted) {
+              setState(() => isLoading = false);
+              _mobileSafetyTimer?.cancel();
+            }
+            // Inject a script to clean up the player UI and hide any 
+            // persistent loaders from the website itself if they hang
+            _controller?.runJavaScript("""
+              var style = document.createElement('style');
+              style.innerHTML = '.loading, .spinner, #loading, #spinner { display: none !important; }';
+              document.head.appendChild(style);
+            """);
           },
           onNavigationRequest: (NavigationRequest request) {
             final String url = request.url.toLowerCase();
@@ -137,6 +167,102 @@ class _MoviePlayerScreenState extends State<MoviePlayerScreen> with WindowListen
         ),
       )
       ..loadRequest(Uri.parse(_playerUrl));
+  }
+
+  void _updatePlayerUrl() {
+    final tvBase = dotenv.env['PLAYER_TV_URL'] ?? "https://vidsrc.to/embed/tv";
+    final movieBase = dotenv.env['PLAYER_MOVIE_URL'] ?? "https://vidsrc.to/embed/movie";
+
+    setState(() {
+      _playerUrl = widget.isTv
+          ? "$tvBase/${widget.tmdbId}/$_currentSeason/$_currentEpisode"
+          : "$movieBase/${widget.tmdbId}";
+    });
+  }
+
+  void _recordWatch() {
+    String displayTitle = widget.isTv ? (_tvName ?? widget.title.split(' - ')[0]) : widget.title;
+    WatchHistoryService.recordWatch(
+      {
+        'id': widget.tmdbId,
+        'title': displayTitle,
+        'name': displayTitle,
+        'poster_path': widget.posterPath,
+        'backdrop_path': widget.backdropPath,
+        'vote_average': widget.voteAverage,
+      },
+      isTv: widget.isTv,
+      season: widget.isTv ? _currentSeason : null,
+      episode: widget.isTv ? _currentEpisode : null,
+    );
+  }
+
+  Future<void> _fetchTVData() async {
+    setState(() => _isLoadingTVData = true);
+    try {
+      final details = await TMDBService.getTVDetails(widget.tmdbId);
+      if (mounted) {
+        setState(() {
+          _tvName = details['name'];
+          _seasons = details['seasons'] as List? ?? [];
+        });
+        await _fetchEpisodesForSeason(_currentSeason);
+      }
+    } catch (e) {
+      debugPrint("Error fetching TV details: $e");
+    } finally {
+      if (mounted) setState(() => _isLoadingTVData = false);
+    }
+  }
+
+  Future<void> _fetchEpisodesForSeason(int seasonNumber) async {
+    try {
+      final episodes = await TMDBService.getTVSeasonEpisodes(widget.tmdbId, seasonNumber);
+      if (mounted) {
+        setState(() {
+          _episodes = episodes;
+        });
+      }
+    } catch (e) {
+      debugPrint("Error fetching episodes: $e");
+    }
+  }
+
+  void _changeEpisode(int? newEpisode) {
+    if (newEpisode == null || newEpisode == _currentEpisode) return;
+    setState(() {
+      _currentEpisode = newEpisode;
+      isLoading = true;
+      _hasLoadedOnce = false;
+    });
+    _updatePlayerUrl();
+    _recordWatch();
+    if (_isWindows) {
+      _winController?.loadUrl(urlRequest: URLRequest(url: WebUri(_playerUrl)));
+    } else {
+      _controller?.loadRequest(Uri.parse(_playerUrl));
+    }
+  }
+
+  void _changeSeason(int? newSeason) async {
+    if (newSeason == null || newSeason == _currentSeason) return;
+    setState(() {
+      _currentSeason = newSeason;
+      _currentEpisode = 1; // Reset to first episode of new season
+      isLoading = true;
+      _hasLoadedOnce = false;
+      _episodes = [];
+      _isLoadingTVData = true;
+    });
+    await _fetchEpisodesForSeason(newSeason);
+    if (mounted) setState(() => _isLoadingTVData = false);
+    _updatePlayerUrl();
+    _recordWatch();
+    if (_isWindows) {
+      _winController?.loadUrl(urlRequest: URLRequest(url: WebUri(_playerUrl)));
+    } else {
+      _controller?.loadRequest(Uri.parse(_playerUrl));
+    }
   }
 
   Future<void> _initWindowsWebview() async {
@@ -192,6 +318,7 @@ class _MoviePlayerScreenState extends State<MoviePlayerScreen> with WindowListen
       windowManager.removeListener(this);
     }
     _hideTimer?.cancel();
+    _mobileSafetyTimer?.cancel();
     SystemChrome.setPreferredOrientations([
       DeviceOrientation.portraitUp,
     ]);
@@ -470,16 +597,30 @@ class _MoviePlayerScreenState extends State<MoviePlayerScreen> with WindowListen
         children: [
           WebViewWidget(controller: _controller!),
           if (isLoading)
-            Container(
-              color: Colors.black,
-              child: const Center(
-                child: Column(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    CircularProgressIndicator(color: AppColors.accent),
-                    SizedBox(height: 16),
-                    Text("Loading stream...", style: TextStyle(color: Colors.white54, fontSize: 13)),
-                  ],
+            GestureDetector(
+              onTap: () {
+                // Manually dismiss the loader if it gets stuck
+                setState(() => isLoading = false);
+              },
+              child: Container(
+                color: Colors.black,
+                child: Center(
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      CircularProgressIndicator(
+                        value: loadingProgress > 0 ? loadingProgress : null,
+                        color: AppColors.accent,
+                      ),
+                      const SizedBox(height: 16),
+                      const Text("Loading stream...", style: TextStyle(color: Colors.white54, fontSize: 13)),
+                      const SizedBox(height: 24),
+                      const Text(
+                        "Tap anywhere to dismiss loader if it's stuck",
+                        style: TextStyle(color: Colors.white24, fontSize: 10),
+                      ),
+                    ],
+                  ),
                 ),
               ),
             ),
@@ -487,10 +628,6 @@ class _MoviePlayerScreenState extends State<MoviePlayerScreen> with WindowListen
       );
     }
 
-    // The landscape/portrait immersive toggle only makes sense on phones
-    // that physically rotate — a desktop window is almost always wider
-    // than tall, so this used to always evaluate to "landscape" on
-    // Windows/Linux and hide the AppBar (and its back button) entirely.
     final bool hideAppBar = _isFullScreen || (!_isWindows && !_isLinux && isLandscape);
 
     final playerScaffold = Scaffold(
@@ -499,7 +636,77 @@ class _MoviePlayerScreenState extends State<MoviePlayerScreen> with WindowListen
           ? null
           : AppBar(
               backgroundColor: Colors.black,
-              title: Text(widget.title, style: const TextStyle(color: Colors.white, fontSize: 16)),
+              title: widget.isTv
+                  ? SingleChildScrollView(
+                      scrollDirection: Axis.horizontal,
+                      child: Row(
+                        children: [
+                          Text(
+                            "${_tvName ?? widget.title.split(' - ')[0]} · S${_currentSeason.toString().padLeft(2, '0')} E${_currentEpisode.toString().padLeft(2, '0')}",
+                            style: const TextStyle(color: Colors.white, fontSize: 14),
+                          ),
+                          const SizedBox(width: 12),
+                          if (_seasons.isNotEmpty)
+                            Container(
+                              height: 32,
+                              padding: const EdgeInsets.symmetric(horizontal: 8),
+                              decoration: BoxDecoration(
+                                color: AppColors.surface,
+                                borderRadius: BorderRadius.circular(8),
+                              ),
+                              child: DropdownButtonHideUnderline(
+                                child: DropdownButton<int>(
+                                  value: _seasons.any((s) => s['season_number'] == _currentSeason) ? _currentSeason : null,
+                                  dropdownColor: AppColors.surface,
+                                  icon: const Icon(Icons.keyboard_arrow_down, color: Colors.white70, size: 18),
+                                  style: const TextStyle(color: Colors.white, fontSize: 13),
+                                  items: _seasons.map((s) {
+                                    return DropdownMenuItem<int>(
+                                      value: s['season_number'],
+                                      child: Text(s['season_number'] == 0 ? "Specials" : "Season ${s['season_number']}"),
+                                    );
+                                  }).toList(),
+                                  onChanged: _isLoadingTVData ? null : _changeSeason,
+                                ),
+                              ),
+                            ),
+                          const SizedBox(width: 8),
+                          if (_episodes.isNotEmpty)
+                            Container(
+                              height: 32,
+                              padding: const EdgeInsets.symmetric(horizontal: 8),
+                              decoration: BoxDecoration(
+                                color: AppColors.surface,
+                                borderRadius: BorderRadius.circular(8),
+                              ),
+                              child: DropdownButtonHideUnderline(
+                                child: DropdownButton<int>(
+                                  value: _episodes.any((e) => e['episode_number'] == _currentEpisode) ? _currentEpisode : null,
+                                  dropdownColor: AppColors.surface,
+                                  icon: const Icon(Icons.keyboard_arrow_down, color: Colors.white70, size: 18),
+                                  style: const TextStyle(color: Colors.white, fontSize: 13),
+                                  items: _episodes.map((e) {
+                                    return DropdownMenuItem<int>(
+                                      value: e['episode_number'],
+                                      child: Text("Episode ${e['episode_number']}"),
+                                    );
+                                  }).toList(),
+                                  onChanged: _isLoadingTVData ? null : _changeEpisode,
+                                ),
+                              ),
+                            ),
+                          if (_isLoadingTVData) ...[
+                            const SizedBox(width: 8),
+                            const SizedBox(
+                              width: 16,
+                              height: 16,
+                              child: CircularProgressIndicator(strokeWidth: 2, color: AppColors.accent),
+                            ),
+                          ],
+                        ],
+                      ),
+                    )
+                  : Text(widget.title, style: const TextStyle(color: Colors.white, fontSize: 16)),
               leading: IconButton(
                 icon: const Icon(Icons.arrow_back, color: Colors.white),
                 onPressed: () async {
@@ -511,6 +718,27 @@ class _MoviePlayerScreenState extends State<MoviePlayerScreen> with WindowListen
                 },
               ),
               actions: [
+                if (widget.isTv)
+                  IconButton(
+                    icon: const Icon(Icons.info_outline, color: Colors.white),
+                    tooltip: "Series Info",
+                    onPressed: () {
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (context) => MovieDetailsScreen(
+                            movie: {
+                              'id': widget.tmdbId,
+                              'name': _tvName ?? widget.title.split(' - ')[0],
+                              'poster_path': widget.posterPath,
+                              'backdrop_path': widget.backdropPath,
+                              'vote_average': widget.voteAverage,
+                            },
+                          ),
+                        ),
+                      );
+                    },
+                  ),
                 if (_isWindows) ...[
                   IconButton(
                     icon: Icon(

@@ -62,20 +62,31 @@ class ApiService {
   }
 
   static Future<String?> login(String email, String password) async {
-    final response = await http.post(
-      Uri.parse('$baseUrl/api/auth/login'),
-      headers: {'Content-Type': 'application/json'},
-      body: jsonEncode({'email': email, 'password': password}),
-    );
+    try {
+      final response = await http.post(
+        Uri.parse('$baseUrl/api/auth/login'),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({'email': email, 'password': password}),
+      ).timeout(const Duration(seconds: 15));
 
-    final data = jsonDecode(response.body);
+      final data = jsonDecode(response.body);
 
-    if (response.statusCode != 200) {
-      return data['error'] ?? 'Login failed.';
+      if (response.statusCode != 200) {
+        return data['error'] ?? 'Login failed.';
+      }
+
+      await _saveToken(data['token']);
+      return null;
+    } catch (e) {
+      debugPrint("Login Error: $e");
+      if (e.toString().contains('SocketException') || e.toString().contains('Connection failed')) {
+        return 'Network error. Please check your internet connection.';
+      }
+      if (e.toString().contains('TimeoutException')) {
+        return 'Connection timed out. Please try again.';
+      }
+      return 'An unexpected error occurred. Please try again later.';
     }
-
-    await _saveToken(data['token']);
-    return null;
   }
 
   static Future<String?> changePassword(String currentPassword, String newPassword) async {
@@ -98,23 +109,28 @@ class ApiService {
   }
 
   static Future<Map<String, dynamic>> getUserProfile() async {
-    final response = await http.get(
-      Uri.parse('$baseUrl/api/auth/me'),
-      headers: await _authHeaders(),
-    );
+    try {
+      final response = await http.get(
+        Uri.parse('$baseUrl/api/auth/me'),
+        headers: await _authHeaders(),
+      ).timeout(const Duration(seconds: 10));
 
-    debugPrint("Profile Response (${response.statusCode}): ${response.body}");
+      debugPrint("Profile Response (${response.statusCode}): ${response.body}");
 
-    if (response.statusCode != 200) {
-      try {
-        final data = jsonDecode(response.body);
-        throw Exception(data['error'] ?? 'Failed to load profile');
-      } catch (e) {
-        throw Exception('Failed to load profile (${response.statusCode})');
+      if (response.statusCode != 200) {
+        try {
+          final data = jsonDecode(response.body);
+          throw Exception(data['error'] ?? 'Failed to load profile');
+        } catch (e) {
+          throw Exception('Failed to load profile (${response.statusCode})');
+        }
       }
-    }
 
-    return jsonDecode(response.body);
+      return jsonDecode(response.body);
+    } catch (e) {
+      debugPrint("GetProfile Error: $e");
+      throw Exception('Network error while loading profile');
+    }
   }
 
   static Future<String?> requestPasswordReset(String email) async {
@@ -158,17 +174,22 @@ class ApiService {
   /// Checks the current user's subscription status.
   /// Returns a map like: { status: 'active', planType: 'monthly', expiresAt: '...' }
   static Future<Map<String, dynamic>> getMySubscription() async {
-    final response = await http.get(
-      Uri.parse('$baseUrl/api/subscriptions/me'),
-      headers: await _authHeaders(),
-    );
+    try {
+      final response = await http.get(
+        Uri.parse('$baseUrl/api/subscriptions/me'),
+        headers: await _authHeaders(),
+      ).timeout(const Duration(seconds: 10));
 
-    final data = jsonDecode(response.body);
+      final data = jsonDecode(response.body);
 
-    if (response.statusCode != 200) {
-      throw Exception(data['error'] ?? 'Failed to check subscription');
+      if (response.statusCode != 200) {
+        throw Exception(data['error'] ?? 'Failed to check subscription');
+      }
+
+      return data;
+    } catch (e) {
+      debugPrint("GetSubscription Error: $e");
+      throw Exception('Network error while checking subscription');
     }
-
-    return data;
   }
 }
