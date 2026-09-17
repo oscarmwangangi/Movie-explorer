@@ -339,8 +339,6 @@ class _MoviePlayerScreenState extends State<MoviePlayerScreen> with WindowListen
     if (mounted && _isWindows) {
       setState(() {
         _isMinimized = false;
-        isLoading = true;
-        _hasLoadedOnce = false;
       });
     }
   }
