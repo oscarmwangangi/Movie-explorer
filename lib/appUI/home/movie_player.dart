@@ -91,7 +91,7 @@ class _MoviePlayerScreenState extends State<MoviePlayerScreen> with WindowListen
     if (widget.isTv) {
       _fetchTVData();
     }
-    
+
     if (_isWindows) {
       _initWindowsWebview();
       return;
@@ -115,36 +115,52 @@ class _MoviePlayerScreenState extends State<MoviePlayerScreen> with WindowListen
             if (mounted) {
               setState(() {
                 loadingProgress = progress / 100;
-                // If progress is high enough, hide the loader even if "finished" hasn't fired
-                if (progress > 80) {
+                // If progress is decent, hide the loader to prevent it getting stuck
+                if (progress > 70) {
                   isLoading = false;
+                  _hasLoadedOnce = true;
                   _mobileSafetyTimer?.cancel();
                 }
               });
             }
           },
           onPageStarted: (String url) {
-            if (mounted) {
+            // Only trigger loading state on the very first start event
+            if (mounted && !_hasLoadedOnce) {
               setState(() => isLoading = true);
-              // Start a safety timer for mobile: force-hide loader after 15s if it gets stuck
-              _mobileSafetyTimer?.cancel();
-              _mobileSafetyTimer = Timer(const Duration(seconds: 15), () {
-                if (mounted && isLoading) {
-                  setState(() => isLoading = false);
-                }
-              });
+
+              // Start safety timer ONLY if not already running. 
+              // This prevents multiple redirects from resetting the 8s countdown.
+              if (_mobileSafetyTimer == null || !_mobileSafetyTimer!.isActive) {
+                _mobileSafetyTimer = Timer(const Duration(seconds: 8), () {
+                  if (mounted && isLoading) {
+                    setState(() {
+                      isLoading = false;
+                      _hasLoadedOnce = true;
+                    });
+                  }
+                });
+              }
             }
           },
           onPageFinished: (String url) {
             if (mounted) {
-              setState(() => isLoading = false);
+              setState(() {
+                isLoading = false;
+                _hasLoadedOnce = true;
+              });
               _mobileSafetyTimer?.cancel();
             }
-            // Inject a script to clean up the player UI and hide any 
-            // persistent loaders from the website itself if they hang
+            // Aggressively hide website-side loaders, pulses, and overlays
             _controller?.runJavaScript("""
               var style = document.createElement('style');
-              style.innerHTML = '.loading, .spinner, #loading, #spinner { display: none !important; }';
+              style.innerHTML = `
+                .loading, .spinner, #loading, #spinner, .preloader, .player-loader,
+                .vjs-loading-spinner, .jw-display-icon-container, .jw-display-icon-display,
+                [class*="loading"], [id*="loading"], [class*="spinner"], [id*="spinner"],
+                svg[class*="loader"], svg[class*="spinner"], .pulsing-circle
+                { display: none !important; opacity: 0 !important; visibility: hidden !important; pointer-events: none !important; }
+              `;
               document.head.appendChild(style);
             """);
           },
@@ -328,17 +344,28 @@ class _MoviePlayerScreenState extends State<MoviePlayerScreen> with WindowListen
   @override
   void onWindowMinimize() {
     if (mounted && _isWindows) {
-      setState(() {
-        _isMinimized = true;
-      });
+      // Safely freeze webview hardware accelerated loops by disabling javascript or webgl layers via settings before hide
+      _winController?.setSettings(settings: InAppWebViewSettings(javaScriptEnabled: false));
+      _winController?.evaluateJavascript(source: """
+            var videos = document.getElementsByTagName('video');
+            for(var i=0; i<videos.length; i++) {
+              videos[i].play();
+            }
+            window.dispatchEvent(new Event('resize'));
+          """);
+
     }
   }
 
   @override
   void onWindowRestore() {
     if (mounted && _isWindows) {
-      setState(() {
-        _isMinimized = false;
+      // Re-enable scripts and force render recalculation
+      _winController?.setSettings(settings: InAppWebViewSettings(javaScriptEnabled: true));
+      Future.delayed(const Duration(milliseconds: 250), () {
+        if (mounted) {
+          _winController?.evaluateJavascript(source: "window.dispatchEvent(new Event('resize'));");
+        }
       });
     }
   }
@@ -450,49 +477,52 @@ class _MoviePlayerScreenState extends State<MoviePlayerScreen> with WindowListen
           onHover: (_) => _onMouseMoved(),
           child: Stack(
             children: [
-              if (!_isMinimized)
+              SizedBox(
+                width: _isMinimized ? 1 : double.infinity,
+                height: _isMinimized ? 1 : double.infinity,
+                child:
                 InAppWebView(
                   webViewEnvironment: _webViewEnvironment,
                   initialUrlRequest: URLRequest(url: WebUri(_playerUrl)),
-                initialSettings: InAppWebViewSettings(
-                  // Use an Android Phone User Agent. This provides the mobile player
-                  // (which has resolution settings) while keeping ads under control.
-                  userAgent:
-                      "Mozilla/5.0 (Linux; Android 13; SM-S901B) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/112.0.0.0 Mobile Safari/537.36",
-                  preferredContentMode: UserPreferredContentMode.MOBILE,
-                  transparentBackground: false, // Changed to false to prevent freeze on some GPUs during resize
-                  useShouldOverrideUrlLoading: true,
-                  mediaPlaybackRequiresUserGesture: false,
-                  allowsInlineMediaPlayback: true,
-                  javaScriptEnabled: true,
-                  javaScriptCanOpenWindowsAutomatically: false,
-                  supportMultipleWindows: false,
-                  isInspectable: kDebugMode,
-                ),
-                onWebViewCreated: (controller) {
-                  _winController = controller;
-                },
-                onProgressChanged: (controller, progress) {
-                  setState(() {
-                    loadingProgress = progress / 100;
-                    if (progress > 80) {
+                  initialSettings: InAppWebViewSettings(
+                    // Use an Android Phone User Agent. This provides the mobile player
+                    // (which has resolution settings) while keeping ads under control.
+                    userAgent:
+                    "Mozilla/5.0 (Linux; Android 13; SM-S901B) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/112.0.0.0 Mobile Safari/537.36",
+                    preferredContentMode: UserPreferredContentMode.MOBILE,
+                    transparentBackground: false, // Changed to false to prevent freeze on some GPUs during resize
+                    useShouldOverrideUrlLoading: true,
+                    mediaPlaybackRequiresUserGesture: false,
+                    allowsInlineMediaPlayback: true,
+                    javaScriptEnabled: true,
+                    javaScriptCanOpenWindowsAutomatically: false,
+                    supportMultipleWindows: false,
+                    isInspectable: kDebugMode,
+                  ),
+                  onWebViewCreated: (controller) {
+                    _winController = controller;
+                  },
+                  onProgressChanged: (controller, progress) {
+                    setState(() {
+                      loadingProgress = progress / 100;
+                      if (progress > 80) {
+                        isLoading = false;
+                        _hasLoadedOnce = true;
+                      }
+                    });
+                  },
+                  onLoadStart: (controller, url) {
+                    if (!_hasLoadedOnce) {
+                      setState(() => isLoading = true);
+                    }
+                  },
+                  onLoadStop: (controller, url) async {
+                    setState(() {
                       isLoading = false;
                       _hasLoadedOnce = true;
-                    }
-                  });
-                },
-                onLoadStart: (controller, url) {
-                  if (!_hasLoadedOnce) {
-                    setState(() => isLoading = true);
-                  }
-                },
-                onLoadStop: (controller, url) async {
-                  setState(() {
-                    isLoading = false;
-                    _hasLoadedOnce = true;
-                  });
-                  // Force a black background and try to auto-click play if possible
-                  await controller.evaluateJavascript(source: """
+                    });
+                    // Force a black background and try to auto-click play if possible
+                    await controller.evaluateJavascript(source: """
                   document.body.style.backgroundColor = 'black';
                   // Attempt to remove any overlaying div that might be a transparent ad-gate
                   var divs = document.getElementsByTagName('div');
@@ -500,57 +530,57 @@ class _MoviePlayerScreenState extends State<MoviePlayerScreen> with WindowListen
                     if(divs[i].style.zIndex > 1000) divs[i].remove();
                   }
                 """);
-                },
-                onLoadError: (controller, url, code, message) {
-                  debugPrint("WebView Load Error: $message (code: $code) at $url");
-                },
-                onLoadHttpError: (controller, url, statusCode, description) {
-                  debugPrint("WebView HTTP Error: $description (status: $statusCode) at $url");
-                },
-                onCreateWindow: (controller, createWindowAction) async {
-                  return false;
-                },
-                shouldOverrideUrlLoading: (controller, navigationAction) async {
-                  final uri = navigationAction.request.url;
-                  if (uri == null) return NavigationActionPolicy.CANCEL;
+                  },
+                  onLoadError: (controller, url, code, message) {
+                    debugPrint("WebView Load Error: $message (code: $code) at $url");
+                  },
+                  onLoadHttpError: (controller, url, statusCode, description) {
+                    debugPrint("WebView HTTP Error: $description (status: $statusCode) at $url");
+                  },
+                  onCreateWindow: (controller, createWindowAction) async {
+                    return false;
+                  },
+                  shouldOverrideUrlLoading: (controller, navigationAction) async {
+                    final uri = navigationAction.request.url;
+                    if (uri == null) return NavigationActionPolicy.CANCEL;
 
-                  final url = uri.toString().toLowerCase();
+                    final url = uri.toString().toLowerCase();
 
-                  // Strictly allow only the player domains and essential scripts.
-                  final isPlayerDomain = url.contains("vidsrc") ||
-                      url.contains("vsembed") ||
-                      url.contains("2embed") ||
-                      url.contains("vidplay") ||
-                      url.contains("moviesapi") ||
-                      url.contains("megacloud") ||
-                      url.contains("vizcloud") ||
-                      url.contains("rabbit") ||
-                      url.contains("bunny");
+                    // Strictly allow only the player domains and essential scripts.
+                    final isPlayerDomain = url.contains("vidsrc") ||
+                        url.contains("vsembed") ||
+                        url.contains("2embed") ||
+                        url.contains("vidplay") ||
+                        url.contains("moviesapi") ||
+                        url.contains("megacloud") ||
+                        url.contains("vizcloud") ||
+                        url.contains("rabbit") ||
+                        url.contains("bunny");
 
-                  final isInfrastructure = url.contains("google.com") ||
-                      url.contains("gstatic.com") ||
-                      url.contains("cloudflare") ||
-                      url.contains("hcaptcha") ||
-                      url.contains("recaptcha");
+                    final isInfrastructure = url.contains("google.com") ||
+                        url.contains("gstatic.com") ||
+                        url.contains("cloudflare") ||
+                        url.contains("hcaptcha") ||
+                        url.contains("recaptcha");
 
-                  if (navigationAction.isForMainFrame) {
-                    if (isPlayerDomain || isInfrastructure || url == _playerUrl.toLowerCase()) {
-                      return NavigationActionPolicy.ALLOW;
+                    if (navigationAction.isForMainFrame) {
+                      if (isPlayerDomain || isInfrastructure || url == _playerUrl.toLowerCase()) {
+                        return NavigationActionPolicy.ALLOW;
+                      }
+                      debugPrint("Blocking main frame redirect to: $url");
+                      // If an ad tries to hijack the main view, we stay on the current page.
+                      return NavigationActionPolicy.CANCEL;
                     }
-                    debugPrint("Blocking main frame redirect to: $url");
-                    // If an ad tries to hijack the main view, we stay on the current page.
-                    return NavigationActionPolicy.CANCEL;
-                  }
 
-                  // For subframes (ads, etc.), we block them unless they are part of the player infrastructure.
-                  if (!isPlayerDomain && !isInfrastructure) {
-                    return NavigationActionPolicy.CANCEL;
-                  }
+                    // For subframes (ads, etc.), we block them unless they are part of the player infrastructure.
+                    if (!isPlayerDomain && !isInfrastructure) {
+                      return NavigationActionPolicy.CANCEL;
+                    }
 
-                  return NavigationActionPolicy.ALLOW;
-                },
-              ),
-              if (isLoading)
+                    return NavigationActionPolicy.ALLOW;
+                  },
+                ),
+              ),if (isLoading)
                 Container(
                   color: Colors.black,
                   child: Center(
@@ -595,29 +625,34 @@ class _MoviePlayerScreenState extends State<MoviePlayerScreen> with WindowListen
         children: [
           WebViewWidget(controller: _controller!),
           if (isLoading)
-            GestureDetector(
-              onTap: () {
-                // Manually dismiss the loader if it gets stuck
-                setState(() => isLoading = false);
-              },
-              child: Container(
-                color: Colors.black,
-                child: Center(
-                  child: Column(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      CircularProgressIndicator(
-                        value: loadingProgress > 0 ? loadingProgress : null,
-                        color: AppColors.accent,
-                      ),
-                      const SizedBox(height: 16),
-                      const Text("Loading stream...", style: TextStyle(color: Colors.white54, fontSize: 13)),
-                      const SizedBox(height: 24),
-                      const Text(
-                        "Tap anywhere to dismiss loader if it's stuck",
-                        style: TextStyle(color: Colors.white24, fontSize: 10),
-                      ),
-                    ],
+            Positioned.fill(
+              child: GestureDetector(
+                onTap: () {
+                  // Manually dismiss the loader if it gets stuck
+                  setState(() {
+                    isLoading = false;
+                    _hasLoadedOnce = true;
+                  });
+                },
+                child: Container(
+                  color: Colors.black,
+                  child: Center(
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        CircularProgressIndicator(
+                          value: loadingProgress > 0 ? loadingProgress : null,
+                          color: AppColors.accent,
+                        ),
+                        const SizedBox(height: 16),
+                        const Text("Loading stream...", style: TextStyle(color: Colors.white54, fontSize: 13)),
+                        const SizedBox(height: 24),
+                        const Text(
+                          "Tap anywhere to dismiss loader if it's stuck",
+                          style: TextStyle(color: Colors.white24, fontSize: 10),
+                        ),
+                      ],
+                    ),
                   ),
                 ),
               ),
@@ -633,132 +668,132 @@ class _MoviePlayerScreenState extends State<MoviePlayerScreen> with WindowListen
       appBar: hideAppBar
           ? null
           : AppBar(
-              backgroundColor: Colors.black,
-              title: widget.isTv
-                  ? SingleChildScrollView(
-                      scrollDirection: Axis.horizontal,
-                      child: Row(
-                        children: [
-                          Text(
-                            "${_tvName ?? widget.title.split(' - ')[0]} · S${_currentSeason.toString().padLeft(2, '0')} E${_currentEpisode.toString().padLeft(2, '0')}",
-                            style: const TextStyle(color: Colors.white, fontSize: 14),
-                          ),
-                          const SizedBox(width: 12),
-                          if (_seasons.isNotEmpty)
-                            Container(
-                              height: 32,
-                              padding: const EdgeInsets.symmetric(horizontal: 8),
-                              decoration: BoxDecoration(
-                                color: AppColors.surface,
-                                borderRadius: BorderRadius.circular(8),
-                              ),
-                              child: DropdownButtonHideUnderline(
-                                child: DropdownButton<int>(
-                                  value: _seasons.any((s) => s['season_number'] == _currentSeason) ? _currentSeason : null,
-                                  dropdownColor: AppColors.surface,
-                                  icon: const Icon(Icons.keyboard_arrow_down, color: Colors.white70, size: 18),
-                                  style: const TextStyle(color: Colors.white, fontSize: 13),
-                                  items: _seasons.map((s) {
-                                    return DropdownMenuItem<int>(
-                                      value: s['season_number'],
-                                      child: Text(s['season_number'] == 0 ? "Specials" : "Season ${s['season_number']}"),
-                                    );
-                                  }).toList(),
-                                  onChanged: _isLoadingTVData ? null : _changeSeason,
-                                ),
-                              ),
-                            ),
-                          const SizedBox(width: 8),
-                          if (_episodes.isNotEmpty)
-                            Container(
-                              height: 32,
-                              padding: const EdgeInsets.symmetric(horizontal: 8),
-                              decoration: BoxDecoration(
-                                color: AppColors.surface,
-                                borderRadius: BorderRadius.circular(8),
-                              ),
-                              child: DropdownButtonHideUnderline(
-                                child: DropdownButton<int>(
-                                  value: _episodes.any((e) => e['episode_number'] == _currentEpisode) ? _currentEpisode : null,
-                                  dropdownColor: AppColors.surface,
-                                  icon: const Icon(Icons.keyboard_arrow_down, color: Colors.white70, size: 18),
-                                  style: const TextStyle(color: Colors.white, fontSize: 13),
-                                  items: _episodes.map((e) {
-                                    return DropdownMenuItem<int>(
-                                      value: e['episode_number'],
-                                      child: Text("Episode ${e['episode_number']}"),
-                                    );
-                                  }).toList(),
-                                  onChanged: _isLoadingTVData ? null : _changeEpisode,
-                                ),
-                              ),
-                            ),
-                          if (_isLoadingTVData) ...[
-                            const SizedBox(width: 8),
-                            const SizedBox(
-                              width: 16,
-                              height: 16,
-                              child: CircularProgressIndicator(strokeWidth: 2, color: AppColors.accent),
-                            ),
-                          ],
-                        ],
-                      ),
-                    )
-                  : Text(widget.title, style: const TextStyle(color: Colors.white, fontSize: 16)),
-              leading: IconButton(
-                icon: const Icon(Icons.arrow_back, color: Colors.white),
-                onPressed: () async {
-                  if (_isFullScreen) {
-                    await windowManager.setFullScreen(false);
-                  }
-                  SystemChrome.setPreferredOrientations([DeviceOrientation.portraitUp]);
-                  if (mounted) Navigator.pop(context);
-                },
+        backgroundColor: Colors.black,
+        title: widget.isTv
+            ? SingleChildScrollView(
+          scrollDirection: Axis.horizontal,
+          child: Row(
+            children: [
+              Text(
+                "${_tvName ?? widget.title.split(' - ')[0]} · S${_currentSeason.toString().padLeft(2, '0')} E${_currentEpisode.toString().padLeft(2, '0')}",
+                style: const TextStyle(color: Colors.white, fontSize: 14),
               ),
-              actions: [
-                if (widget.isTv)
-                  IconButton(
-                    icon: const Icon(Icons.info_outline, color: Colors.white),
-                    tooltip: "Series Info",
-                    onPressed: () {
-                      Navigator.push(
-                        context,
-                        MaterialPageRoute(
-                          builder: (context) => MovieDetailsScreen(
-                            movie: {
-                              'id': widget.tmdbId,
-                              'name': _tvName ?? widget.title.split(' - ')[0],
-                              'poster_path': widget.posterPath,
-                              'backdrop_path': widget.backdropPath,
-                              'vote_average': widget.voteAverage,
-                            },
-                          ),
-                        ),
-                      );
-                    },
+              const SizedBox(width: 12),
+              if (_seasons.isNotEmpty)
+                Container(
+                  height: 32,
+                  padding: const EdgeInsets.symmetric(horizontal: 8),
+                  decoration: BoxDecoration(
+                    color: AppColors.surface,
+                    borderRadius: BorderRadius.circular(8),
                   ),
-                if (_isWindows) ...[
-                  IconButton(
-                    icon: Icon(
-                      _isFullScreen ? Icons.fullscreen_exit : Icons.fullscreen,
-                      color: Colors.white,
+                  child: DropdownButtonHideUnderline(
+                    child: DropdownButton<int>(
+                      value: _seasons.any((s) => s['season_number'] == _currentSeason) ? _currentSeason : null,
+                      dropdownColor: AppColors.surface,
+                      icon: const Icon(Icons.keyboard_arrow_down, color: Colors.white70, size: 18),
+                      style: const TextStyle(color: Colors.white, fontSize: 13),
+                      items: _seasons.map((s) {
+                        return DropdownMenuItem<int>(
+                          value: s['season_number'],
+                          child: Text(s['season_number'] == 0 ? "Specials" : "Season ${s['season_number']}"),
+                        );
+                      }).toList(),
+                      onChanged: _isLoadingTVData ? null : _changeSeason,
                     ),
-                    onPressed: _toggleWindowsFullScreen,
                   ),
-                  IconButton(
-                    icon: const Icon(Icons.refresh, color: Colors.white),
-                    onPressed: () {
-                      _winController?.reload();
-                    },
+                ),
+              const SizedBox(width: 8),
+              if (_episodes.isNotEmpty)
+                Container(
+                  height: 32,
+                  padding: const EdgeInsets.symmetric(horizontal: 8),
+                  decoration: BoxDecoration(
+                    color: AppColors.surface,
+                    borderRadius: BorderRadius.circular(8),
                   ),
-                ],
-                if (!_isWindows && !_isLinux)
-                  IconButton(
-                    icon: const Icon(Icons.screen_rotation, color: Colors.white),
-                    onPressed: _toggleRotation,
+                  child: DropdownButtonHideUnderline(
+                    child: DropdownButton<int>(
+                      value: _episodes.any((e) => e['episode_number'] == _currentEpisode) ? _currentEpisode : null,
+                      dropdownColor: AppColors.surface,
+                      icon: const Icon(Icons.keyboard_arrow_down, color: Colors.white70, size: 18),
+                      style: const TextStyle(color: Colors.white, fontSize: 13),
+                      items: _episodes.map((e) {
+                        return DropdownMenuItem<int>(
+                          value: e['episode_number'],
+                          child: Text("Episode ${e['episode_number']}"),
+                        );
+                      }).toList(),
+                      onChanged: _isLoadingTVData ? null : _changeEpisode,
+                    ),
                   ),
+                ),
+              if (_isLoadingTVData) ...[
+                const SizedBox(width: 8),
+                const SizedBox(
+                  width: 16,
+                  height: 16,
+                  child: CircularProgressIndicator(strokeWidth: 2, color: AppColors.accent),
+                ),
               ],
+            ],
+          ),
+        )
+            : Text(widget.title, style: const TextStyle(color: Colors.white, fontSize: 16)),
+        leading: IconButton(
+          icon: const Icon(Icons.arrow_back, color: Colors.white),
+          onPressed: () async {
+            if (_isFullScreen) {
+              await windowManager.setFullScreen(false);
+            }
+            SystemChrome.setPreferredOrientations([DeviceOrientation.portraitUp]);
+            if (mounted) Navigator.pop(context);
+          },
+        ),
+        actions: [
+          if (widget.isTv)
+            IconButton(
+              icon: const Icon(Icons.info_outline, color: Colors.white),
+              tooltip: "Series Info",
+              onPressed: () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (context) => MovieDetailsScreen(
+                      movie: {
+                        'id': widget.tmdbId,
+                        'name': _tvName ?? widget.title.split(' - ')[0],
+                        'poster_path': widget.posterPath,
+                        'backdrop_path': widget.backdropPath,
+                        'vote_average': widget.voteAverage,
+                      },
+                    ),
+                  ),
+                );
+              },
             ),
+          if (_isWindows) ...[
+            IconButton(
+              icon: Icon(
+                _isFullScreen ? Icons.fullscreen_exit : Icons.fullscreen,
+                color: Colors.white,
+              ),
+              onPressed: _toggleWindowsFullScreen,
+            ),
+            IconButton(
+              icon: const Icon(Icons.refresh, color: Colors.white),
+              onPressed: () {
+                _winController?.reload();
+              },
+            ),
+          ],
+          if (!_isWindows && !_isLinux)
+            IconButton(
+              icon: const Icon(Icons.screen_rotation, color: Colors.white),
+              onPressed: _toggleRotation,
+            ),
+        ],
+      ),
       body: body,
     );
 

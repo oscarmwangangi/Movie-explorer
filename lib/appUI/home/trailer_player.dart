@@ -250,12 +250,12 @@ class _TrailerPlayerScreenState extends State<TrailerPlayerScreen> with WindowLi
           onHover: (_) => _onMouseMoved(),
           child: Stack(
             children: [
-              if (!_isMinimized)
-                InAppWebView(
-                  webViewEnvironment: _webViewEnvironment,
-                  initialUrlRequest: URLRequest(
-                    url: WebUri("https://www.youtube.com/embed/${widget.youtubeKey}?autoplay=1"),
-                  ),
+            if (!_isMinimized)
+              InAppWebView(
+                webViewEnvironment: _webViewEnvironment,
+                initialUrlRequest: URLRequest(
+                  url: WebUri("https://www.youtube.com/embed/${widget.youtubeKey}?autoplay=1"),
+                ),
                 initialSettings: InAppWebViewSettings(
                   transparentBackground: false, // Prevents freeze during full-screen resize
                   mediaPlaybackRequiresUserGesture: false,
